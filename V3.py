@@ -1,4 +1,5 @@
 
+import os
 import requests
 import math
 from flask import Flask, request, jsonify, render_template_string
@@ -219,7 +220,8 @@ def home():
 
 @app.route("/api/competitions", methods=["POST"])
 def competitions():
-    token = request.json.get("token", "").strip()
+    body = request.get_json(silent=True) or {}
+    token = body.get("token", "").strip()
 
     if not token:
         return jsonify({"error": "دخل API KEY أولاً"}), 400
@@ -248,9 +250,12 @@ def competitions():
 
 @app.route("/api/teams", methods=["POST"])
 def teams():
-    body = request.json
+    body = request.get_json(silent=True) or {}
     token = body.get("token", "").strip()
     code = body.get("code", "").strip()
+
+    if not token or not code:
+        return jsonify({"error": "API KEY والبطولة مطلوبين"}), 400
 
     data = get_data(f"/competitions/{code}/teams", token)
 
@@ -265,14 +270,18 @@ def teams():
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
-    body = request.json
+    body = request.get_json(silent=True) or {}
 
     token = body.get("token", "").strip()
-    home_id = int(body.get("home_id"))
-    away_id = int(body.get("away_id"))
 
     if not token:
-        return jsonify({"error": "API KEY مطلوب"})
+        return jsonify({"error": "API KEY مطلوب"}), 400
+
+    try:
+        home_id = int(body.get("home_id"))
+        away_id = int(body.get("away_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "اختار الفريقين أولاً"}), 400
 
     if home_id == away_id:
         return jsonify({"error": "اختار جوج فرق مختلفين"})
@@ -577,23 +586,27 @@ async function loadTeams(){
     if(!code)return;
 
     showMessage("جاري تحميل الفرق...");
-    const data=await post("/api/teams",{
-        token:token(),code:code
-    });
-
-    if(data.error)return showMessage(data.error,true);
-
-    ["home","away"].forEach(id=>{
-        $(id).innerHTML='<option value="">اختار الفريق</option>';
-        data.forEach(t=>{
-            const op=document.createElement("option");
-            op.value=t.id;
-            op.textContent=t.name;
-            $(id).appendChild(op);
+    try{
+        const data=await post("/api/teams",{
+            token:token(),code:code
         });
-    });
 
-    showMessage("تم تحميل الفرق");
+        if(data.error)return showMessage(data.error,true);
+
+        ["home","away"].forEach(id=>{
+            $(id).innerHTML='<option value="">اختار الفريق</option>';
+            data.forEach(t=>{
+                const op=document.createElement("option");
+                op.value=t.id;
+                op.textContent=t.name;
+                $(id).appendChild(op);
+            });
+        });
+
+        showMessage("تم تحميل الفرق");
+    }catch(e){
+        showMessage("وقع مشكل في الاتصال بالسيرفر",true);
+    }
 }
 
 function percent(v){
@@ -638,6 +651,10 @@ async function analyzeMatch(){
 
         $("homeName").textContent=$("home").selectedOptions[0].textContent;
         $("awayName").textContent=$("away").selectedOptions[0].textContent;
+
+        ["pHome","pDraw","pAway"].forEach(id=>{
+            $(id).classList.remove("green");
+        });
 
         $("pHome").textContent=percent(p.home);
         $("pDraw").textContent=percent(p.draw);
@@ -702,7 +719,23 @@ async function analyzeMatch(){
 """
 
 
+# =========================
+# START SERVER
+# =========================
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "app": "FOOTBALL PREDICTOR PRO"})
+
+
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+
     print("FOOTBALL PREDICTOR PRO V3.0")
-    print("فتح المتصفح على: http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    print("Server started on port:", port)
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
